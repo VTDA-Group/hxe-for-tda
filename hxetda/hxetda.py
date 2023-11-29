@@ -9,26 +9,26 @@ from sklearn import preprocessing
 import torch.nn as nn
 
 def masked_softmax(vec, mask, dim=1, epsilon=1e-10):
-    masked_vec = vec * mask.float()
-    exps = torch.exp(masked_vec)
-    masked_exps = exps * mask.float()
-    masked_sums = masked_exps.sum(dim, keepdim=True) + epsilon
-    final_vec = masked_exps/masked_sums + ((1-mask) * vec)
-    return final_vec
+	masked_vec = vec * mask.float()
+	exps = torch.exp(masked_vec)
+	masked_exps = exps * mask.float()
+	masked_sums = masked_exps.sum(dim, keepdim=True) + epsilon
+	final_vec = masked_exps/masked_sums + ((1-mask) * vec)
+	return final_vec
 
 def custom_hier_loss(output, target, target_weights, mask_list, pathlengths):
-    final_sum = 0
-    alpha = 0.5
-    output[:, 0] = 1.0
+	final_sum = 0
+	alpha = 0.5
+	output[:, 0] = 1.0
 
-    for i,mask in enumerate(mask_list):
-        output = masked_softmax(output, mask)
-    output = output.log()
-    output = output * np.exp(-alpha * (pathlengths - 1))
-    final_sum = (target_weights * (output*target).sum(dim=1)).mean()
-    #final_sum = ((output*target).sum(dim=1)).mean()
+	for i,mask in enumerate(mask_list):
+		output = masked_softmax(output, mask)
+	output = output.log()
+	output = output * np.exp(-alpha * (pathlengths - 1))
+	final_sum = (target_weights * (output*target).sum(dim=1)).mean()
+	#final_sum = ((output*target).sum(dim=1)).mean()
 
-    return -final_sum
+	return -final_sum
 
 def calc_class_weights(labels, vertices, all_paths):
 	# Get the weights of each class label...
@@ -41,16 +41,13 @@ def calc_class_weights(labels, vertices, all_paths):
 			if ulabel in all_paths[gind[0][0]]:
 				count_for_ulabel += class_counts[np.where(ulabels==ulabel2)]
 
-		class_weight_dict[ulabel] = (10/count_for_ulabel)
+		class_weight_dict[ulabel] = (np.sum(class_counts)/(len(ulabels) * count_for_ulabel))
 	return class_weight_dict
 
 #this could take just a graph...
 def calc_path_and_mask(G, vertices, root):
 	all_paths = np.zeros((len(vertices), len(vertices)))
 	new_new_A = np.zeros((len(vertices), len(vertices)))
-
-	# Find root...
-	root = 'Object'
 
 	pathlengths = []
 	parent_groups = []
@@ -80,35 +77,83 @@ def calc_path_and_mask(G, vertices, root):
 	return all_paths, pathlengths, mask_list, y_dict
 
 def get_prob(input_vec, desired_class, all_paths, vertices, mask_list):
-    output = input_vec * 1.0
-    output[:,0] = 1.0
+	output = input_vec * 1.0
+	output[:,0] = 1.0
 
-    for i,mask in enumerate(mask_list):
-        output = masked_softmax(output, mask)
-    
-    gind = np.where(vertices == desired_class)
-    myprob = torch.ones(len(input_vec))
-    for thing in all_paths[gind[0][0]]:
-        gind2 = np.where(vertices == thing)[0]
-        myprob = myprob * output[:,gind2[0]]
-    return myprob
+	for i,mask in enumerate(mask_list):
+		output = masked_softmax(output, mask)
+	
+	gind = np.where(vertices == desired_class)
+	myprob = torch.ones(len(input_vec))
+	for thing in all_paths[gind[0][0]]:
+		gind2 = np.where(vertices == thing)[0]
+		myprob = myprob * output[:,gind2[0]]
+	return myprob
 
+def is_parent(label_child, desired_parent, vertices, all_paths):
+	gind  = np.where(vertices == label_child)
+	if desired_parent in all_paths[gind[0][0]]:
+		return True
+	else:
+		return False
 
 class Feedforward(torch.nn.Module):
-        def __init__(self, input_size, hidden_size, output_size):
-            super(Feedforward, self).__init__()
-            self.input_size = input_size
-            self.hidden_size  = hidden_size
-            self.output_size  = output_size
+		def __init__(self, input_size, hidden_size, output_size):
+			super(Feedforward, self).__init__()
+			self.input_size = input_size
+			self.hidden_size  = hidden_size
+			self.output_size  = output_size
 
-            self.fc1 = torch.nn.Linear(self.input_size, self.hidden_size)
-            self.relu = torch.nn.Sigmoid()
-            self.fc2 = torch.nn.Linear(self.hidden_size, self.hidden_size)
-            self.fc3 = torch.nn.Linear(self.hidden_size, self.output_size)
-        def forward(self, x):
-            hidden = self.fc1(x)
-            relu = self.relu(hidden)
-            output1 = self.fc2(relu)
-            output2 = self.relu(output1)
-            output3 = self.fc3(output2)
-            return output3
+			self.fc1 = torch.nn.Linear(self.input_size, self.hidden_size)
+			self.relu = torch.nn.Sigmoid()
+			self.fc2 = torch.nn.Linear(self.hidden_size, self.hidden_size)
+			self.fc3 = torch.nn.Linear(self.hidden_size, self.output_size)
+		def forward(self, x):
+			hidden = self.fc1(x)
+			relu = self.relu(hidden)
+			output1 = self.fc2(relu)
+			output2 = self.relu(output1)
+			output3 = self.fc3(output2)
+			return output3
+
+
+#I shamelessly stole this from stackoverflow: https://stackoverflow.com/questions/29586520/can-one-get-hierarchical-graphs-from-networkx-with-python-3
+def hierarchy_pos(G, root, levels=None, width=1., height=1.):
+    '''If there is a cycle that is reachable from root, then this will see infinite recursion.
+       G: the graph
+       root: the root node
+       levels: a dictionary
+               key: level number (starting from 0)
+               value: number of nodes in this level
+       width: horizontal space allocated for drawing
+       height: vertical space allocated for drawing'''
+    TOTAL = "total"
+    CURRENT = "current"
+    def make_levels(levels, node=root, currentLevel=0, parent=None):
+        """Compute the number of nodes for each level
+        """
+        if not currentLevel in levels:
+            levels[currentLevel] = {TOTAL : 0, CURRENT : 0}
+        levels[currentLevel][TOTAL] += 1
+        neighbors = G.neighbors(node)
+        for neighbor in neighbors:
+            if not neighbor == parent:
+                levels =  make_levels(levels, neighbor, currentLevel + 1, node)
+        return levels
+
+    def make_pos(pos, node=root, currentLevel=0, parent=None, vert_loc=0):
+        dx = 1/levels[currentLevel][TOTAL]
+        left = dx/2
+        pos[node] = ((left + dx*levels[currentLevel][CURRENT])*width, vert_loc)
+        levels[currentLevel][CURRENT] += 1
+        neighbors = G.neighbors(node)
+        for neighbor in neighbors:
+            if not neighbor == parent:
+                pos = make_pos(pos, neighbor, currentLevel + 1, node, vert_loc-vert_gap)
+        return pos
+    if levels is None:
+        levels = make_levels({})
+    else:
+        levels = {l:{TOTAL: levels[l], CURRENT:0} for l in levels}
+    vert_gap = height / (max([l for l in levels])+1)
+    return make_pos({})

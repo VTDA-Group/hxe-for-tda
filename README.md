@@ -1,3 +1,5 @@
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.13386740.svg)](https://doi.org/10.5281/zenodo.13386740)
+
 # A Weighted Hierarchical Cross-entropy Loss for Classification of Astrophysical Transients
 
 This repository is for the workshop proceeding [NeurIPS Workshop paper](https://arxiv.org/abs/2312.02266) by Villar et al., and the paper [The Impact of Host Galaxy Properties on Supernova Classification with Hierarchical Labels](arxiv.org) by Villar et al. It is associated with the manuscript number Z. 
